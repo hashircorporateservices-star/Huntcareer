@@ -77,6 +77,36 @@ class ResumeController extends Controller
         );
     }
 
+    /** Upload a resume file (pdf/docx/txt), store it, extract text. */
+    public function upload(Request $request, \App\Services\ResumeParsingService $parser)
+    {
+        $request->validate([
+            'file'    => 'required|file|mimes:pdf,doc,docx,txt,md|max:5120', // 5 MB
+            'label'   => 'nullable|string|max:120',
+            'is_base' => 'boolean',
+        ]);
+
+        $file = $request->file('file');
+        $ext  = $file->getClientOriginalExtension();
+
+        // Private storage — resumes are never web-public.
+        $path = $file->store("resumes/{$request->user()->id}");
+        $text = $parser->extract(storage_path("app/{$path}"), $ext);
+
+        if ($request->boolean('is_base')) {
+            $request->user()->resumes()->where('is_base', true)->update(['is_base' => false]);
+        }
+
+        return response()->json(Resume::create([
+            'user_id'      => $request->user()->id,
+            'label'        => $request->input('label') ?: $file->getClientOriginalName(),
+            'is_base'      => $request->boolean('is_base'),
+            'storage_path' => $path,
+            'parsed_text'  => $text,
+            'parsed_at'    => now(),
+        ]), 201);
+    }
+
     protected function owns(Request $request, Resume $resume): void
     {
         abort_unless($resume->user_id === $request->user()->id, 403);
